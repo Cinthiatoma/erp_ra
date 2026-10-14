@@ -163,12 +163,12 @@ function vTarefas(){
    <select data-a="sort" aria-label="Classificar por">${SORTS.map(([k,n])=>`<option value="${k}"${sortBy===k?" selected":""}>Classificar: ${n}</option>`).join("")}</select>
    <button class="btn p" data-a="novaT">Nova tarefa</button></div>
   <div class="chips" style="margin-bottom:12px">${["Todos",...RESP].map(r=>`<button class="chip${filtroResp===r?" on":""}" data-a="resp" data-v="${r}">${r}${r==="Todos"?"":" ("+S.tarefas.filter(t=>t.resp===r).length+")"}</button>`).join("")}</div>
-  <div class="wrap"><table><thead><tr><th>Cliente</th><th>Tarefa</th><th>Prioridade</th><th>Status</th><th>Dias para entrega</th><th>Início</th><th>Previsão</th><th>Responsável</th><th></th></tr></thead><tbody>
-  ${lista.map(t=>`<tr><td>${esc(nome(t.cliente))}</td><td title="${esc(t.desc)}"><b>${esc(t.tarefa)}</b></td><td class="${t.prioridade==="Alta"?"pa":t.prioridade==="Média"?"pm":""}">${t.prioridade}</td>
+  <div class="wrap"><table><thead><tr><th>Cliente</th><th>Tarefa</th><th>Prioridade</th><th>Status</th><th>Dias para entrega</th><th>Início</th><th>Previsão</th><th>Responsável</th></tr></thead><tbody>
+  ${lista.map(t=>`<tr><td>${esc(nome(t.cliente))}</td><td title="${esc(t.desc)}"><a href="#" class="lk" data-a="ver" data-id="${t.id}">${esc(t.tarefa)}</a>${(t.anexos||[]).length?`<span class="clip" title="Anexos">📎 ${t.anexos.length}</span>`:""}</td><td class="${t.prioridade==="Alta"?"pa":t.prioridade==="Média"?"pm":""}">${t.prioridade}</td>
    <td><select class="st s-${cls(ST_TAR,t.status)}" data-a="ts" data-id="${t.id}">${opts(ST_TAR,t.status)}</select></td><td>${dias(t)}</td>
    <td class="dt">${dt(t.inicio)}</td><td class="dt">${dt(t.previsao)}</td>
    <td>${esc(t.resp)}</td>
-   <td><button class="btn" data-a="editT" data-id="${t.id}">Editar</button></td></tr>`).join("")||`<tr><td colspan="9" class="empty">Nenhuma tarefa${filtroTar!=="Todas"?" com este status":" cadastrada"}.</td></tr>`}
+   </tr>`).join("")||`<tr><td colspan="8" class="empty">Nenhuma tarefa${filtroTar!=="Todas"?" com este status":" cadastrada"}.</td></tr>`}
   </tbody></table></div>`;
 }
 
@@ -189,13 +189,93 @@ function formTarefa(t){
    <div class="acts">${n?"":`<button class="btn d" value="del" formnovalidate style="margin-right:auto">Excluir</button>`}<button class="btn" value="x" formnovalidate>Cancelar</button><button class="btn p" value="ok">Salvar</button></div>`;
   frm.onsubmit=e=>{
     const v=e.submitter?.value;
-    if(v==="del"){S.tarefas=S.tarefas.filter(x=>x.id!==t.id)}
+    if(v==="del"){if(!duplo(e.submitter)){e.preventDefault();return}(t.anexos||[]).forEach(apagarAnexo);S.tarefas=S.tarefas.filter(x=>x.id!==t.id)}
     else if(v==="ok"){const o=Object.fromEntries(new FormData(frm));if(n)S.tarefas.push({id:uid(),...o});else Object.assign(t,o)}
     else return;
     salvar();render();
   };
   dlg.showModal();
 }
+/* ---------- avisos, confirmação e salvar ---------- */
+function duplo(b){
+  if(b.dataset.ok)return true;
+  b.dataset.ok=1;const t=b.textContent;b.textContent="Confirmar?";b.classList.add("armed");
+  setTimeout(()=>{if(b.isConnected){delete b.dataset.ok;b.textContent=t;b.classList.remove("armed")}},4000);
+  return false;
+}
+function aviso(m){const d=document.createElement("div");d.className="toast";d.textContent=m;(dlg.open?dlg:document.body).appendChild(d);setTimeout(()=>d.remove(),4500)}
+async function salvarAgora(){
+  const j=JSON.stringify(S);clearTimeout(tmr);
+  try{localStorage.setItem("erp_ra",j)}catch(e){}
+  try{if(docRef)await docRef.set({json:j});setSync("Salvo às "+new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}))}catch(e){setSync("Erro ao salvar")}
+}
+/* ---------- consulta e anexos ---------- */
+const MAXMB=20;
+const tamTxt=n=>n<1024?n+" B":n<1048576?Math.round(n/1024)+" KB":(n/1048576).toFixed(1)+" MB";
+function idbOp(modo,fn){
+  return new Promise((ok,no)=>{
+    const r=indexedDB.open("erp_ra_anexos",1);
+    r.onupgradeneeded=()=>r.result.createObjectStore("f");
+    r.onerror=()=>no(r.error);
+    r.onsuccess=()=>{const tx=r.result.transaction("f",modo),rq=fn(tx.objectStore("f"));tx.oncomplete=()=>ok(rq.result);tx.onerror=()=>no(tx.error)};
+  });
+}
+async function guardarAnexo(f){
+  if(f.size>MAXMB*1048576)throw new Error("limite de "+MAXMB+" MB");
+  const base={id:uid()+uid(),nome:f.name,tipo:f.type,tam:f.size};
+  try{const as=await claude.use("assets");if(as){const r=await as.upload(f);return {...base,id:r.id,src:"asset",url:r.url}}}catch(e){}
+  await idbOp("readwrite",s=>s.put(f,base.id));
+  return {...base,src:"local"};
+}
+async function apagarAnexo(a){
+  try{if(a.src==="asset"){const as=await claude.use("assets");if(as)await as.delete(a.id)}else await idbOp("readwrite",s=>s.delete(a.id))}catch(e){}
+}
+async function abrirAnexo(a){
+  const l=document.createElement("a");let u=a.url;
+  if(a.src!=="asset"){
+    const b=await idbOp("readonly",s=>s.get(a.id));
+    if(!b)return aviso("Arquivo não encontrado neste navegador.");
+    u=URL.createObjectURL(b);l.download=a.nome;setTimeout(()=>URL.revokeObjectURL(u),8000);
+  }
+  l.href=u;l.target="_blank";l.rel="noopener";l.click();
+}
+let cur=null;
+function consultar(id){
+  const t=S.tarefas.find(x=>x.id===id);if(!t)return;
+  cur=t;
+  const cl=(S.clientes.find(c=>c.id===t.cliente)||{}).nome||"—",A=t.anexos||[];
+  frm.onsubmit=null;
+  frm.innerHTML=`<h3>${esc(t.tarefa)}</h3><div class="f">
+   <div class="k">Cliente<b>${esc(cl)}</b></div>
+   <div class="k">Responsável<b>${esc(t.resp)||"—"}</b></div>
+   <div class="k">Prioridade<b class="${t.prioridade==="Alta"?"pa":t.prioridade==="Média"?"pm":""}">${t.prioridade}</b></div>
+   <div class="k">Status<b>${t.status}</b></div>
+   <div class="k">Início<b>${dt(t.inicio)||"—"}</b></div>
+   <div class="k">Previsão de entrega<b>${dt(t.previsao)||"—"}</b></div>
+   <div class="k">Dias para entrega<span>${dias(t)||"—"}</span></div>
+   <div class="k w">Descrição<b style="font-weight:500;white-space:pre-wrap">${esc(t.desc)||"—"}</b></div>
+   <div class="k w">Anexos<ul class="anx">${A.map(a=>`<li><a href="#" data-open="${a.id}">${esc(a.nome)}</a><small>${tamTxt(a.tam||0)}</small><button type="button" class="btn d" data-del="${a.id}">Excluir</button></li>`).join("")||`<li class="mute">Nenhum anexo.</li>`}</ul>
+    <input type="file" id="fx" multiple hidden><div><button type="button" class="btn" id="addx">Adicionar anexo</button></div></div></div>
+   <div class="acts"><button class="btn" value="x" formnovalidate>Fechar</button><button type="button" class="btn" id="edt">Editar</button><button type="button" class="btn p" id="sv2">Salvar</button></div>`;
+  if(!dlg.open)dlg.showModal();
+}
+frm.addEventListener("click",async e=>{
+  const b=e.target.closest("[data-open],[data-del],#addx,#edt,#sv2");if(!b||!cur)return;
+  e.preventDefault();
+  if(b.id==="addx")return frm.querySelector("#fx").click();
+  if(b.id==="sv2"){await salvarAgora();return dlg.close()}
+  if(b.id==="edt"){dlg.close();return formTarefa(cur)}
+  const a=(cur.anexos||[]).find(x=>x.id===(b.dataset.open||b.dataset.del));if(!a)return;
+  if(b.dataset.open)abrirAnexo(a);
+  else if(duplo(b)){await apagarAnexo(a);cur.anexos=cur.anexos.filter(x=>x!==a);salvar();consultar(cur.id);render()}
+});
+frm.addEventListener("change",async e=>{
+  if(e.target.id!=="fx"||!cur)return;
+  for(const f of e.target.files){
+    try{(cur.anexos=cur.anexos||[]).push(await guardarAnexo(f))}catch(err){aviso(`Não foi possível anexar "${f.name}": ${err.message||err}`)}
+  }
+  salvar();consultar(cur.id);render();
+});
 function formCliente(){
   frm.innerHTML=`<h3>Novo cliente</h3><div class="f"><label class="w">Nome<input name="nome" required></label>
    <label>Tipo de contrato<select name="tipo">${optsS(TIPOS,"Mensal")}</select></label>
@@ -224,9 +304,9 @@ function acao(e){
     else if(a==="hoje"){mes=ymd(hoje);render()}
     else if(a==="resp"){filtroResp=el.dataset.v;render()}
     else if(a==="novoC")formCliente();
-    else if(a==="novaT"){if(!S.clientes.length)return alert("Cadastre um cliente antes.");formTarefa()}
-    else if(a==="editT")formTarefa(t);
-    else if(a==="delC"&&confirm(`Excluir "${c.nome}"? O histórico financeiro dele também será removido.`)){
+    else if(a==="novaT"){if(!S.clientes.length)return aviso("Cadastre um cliente antes.");formTarefa()}
+    else if(a==="ver"){e.preventDefault();consultar(id)}
+    else if(a==="delC"&&duplo(el)){
       S.clientes=S.clientes.filter(x=>x.id!==id);Object.values(S.fin).forEach(m=>delete m[id]);S.tarefas=S.tarefas.filter(x=>x.cliente!==id);salvar();render()}
     return;
   }
@@ -254,4 +334,5 @@ function render(){
   window.scrollTo(0,y);
 }
 document.getElementById("nav").addEventListener("click",e=>{const b=e.target.closest("[data-tab]");if(b){tab=b.dataset.tab;render()}});
+document.getElementById("svbtn").onclick=salvarAgora;
 carregar();

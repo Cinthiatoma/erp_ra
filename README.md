@@ -23,6 +23,10 @@ Os dados ficam no `localStorage` do navegador (chave `erp_ra`). Fora do ambiente
 
 Para uso em equipe, o próximo passo é trocar as funções `carregar()` e `salvar()` em `app.js` por chamadas a uma API ou banco (Supabase, Firebase etc.).
 
+## Anexos
+
+Cada tarefa aceita anexos (até 20 MB por arquivo). Fora do Claude, os arquivos ficam no `IndexedDB` do navegador e não são compartilhados entre pessoas; para uso em equipe, guarde-os em um serviço de arquivos (Supabase Storage, S3 etc.) alterando `guardarAnexo`, `apagarAnexo` e `abrirAnexo` em `app.js`.
+
 ## Estrutura
 
 ```
