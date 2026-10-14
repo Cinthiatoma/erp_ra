@@ -15,8 +15,10 @@ const ymd=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
 
 const NOMES=[["Prefeitura de Alumínio","Mensal"],["Prefeitura de Boituva","Mensal"],["Câmara de Boituva","Mensal"],["Câmara de Hortolândia","Projeto"],["Câmara de Porangaba","Projeto"],["Câmara de Itu","Projeto"],["Câmara de Iperó","Mensal"],["CECAM","Mensal"],["ELO Editora","Mensal"],["Infinity Software","Mensal"],["Infinity Sistem","Mensal"],["Sondotécnica","Projeto"],["Prefeitura de Fartura","Projeto"],["Câmara de Mairinque","Projeto"]];
 const padrao=()=>({clientes:NOMES.map(([nome,tipo])=>({id:uid(),nome,tipo,dia:5,valor:10000,pct:8.3})),tarefas:[],fin:{}});
-let S=padrao(), tab="tarefas", mes=ymd(hoje), filtroTar="Todas", filtroResp="Todos";
+let S=padrao(), tab="tarefas", mes=ymd(hoje), filtroTar="Todas", filtroResp="Todos", sortBy="previsao", sortDir=1;
 const RESP=["Jesse","Gabriela","Cinthia"];
+const CHAVES={previsao:t=>t.previsao||"9",inicio:t=>t.inicio||"9",prioridade:t=>({Alta:0,"Média":1,Baixa:2})[t.prioridade]??9,status:t=>({"A fazer":0,"Em andamento":1,"Concluída":2,Cancelada:3})[t.status]??9,cliente:t=>((S.clientes.find(c=>c.id===t.cliente)||{}).nome||"").toLowerCase(),resp:t=>(t.resp||"").toLowerCase()};
+const SORTS=[["previsao","Previsão"],["inicio","Início"],["prioridade","Prioridade"],["status","Status"],["cliente","Cliente"],["resp","Responsável"]];
 
 /* ---------- persistência: banco compartilhado (db) com cópia local ---------- */
 const dd=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
@@ -155,9 +157,10 @@ function dias(t){
 }
 function vTarefas(){
   const nome=id=>(S.clientes.find(c=>c.id===id)||{}).nome||"—";
-  const lista=S.tarefas.filter(t=>(filtroTar==="Todas"||t.status===filtroTar)&&(filtroResp==="Todos"||t.resp===filtroResp)).sort((a,b)=>(a.previsao||"9").localeCompare(b.previsao||"9"));
+  const lista=S.tarefas.filter(t=>(filtroTar==="Todas"||t.status===filtroTar)&&(filtroResp==="Todos"||t.resp===filtroResp)).sort((a,b)=>{const k=CHAVES[sortBy],x=k(a),y=k(b);return (x<y?-1:x>y?1:0)*sortDir});
   return `<div class="bar"><h2>Tarefas</h2>
    <select data-a="filtro" aria-label="Filtrar por status"><option>Todas</option>${ST_TAR.map(x=>`<option${filtroTar===x[0]?" selected":""}>${x[0]}</option>`).join("")}</select>
+   <select data-a="sort" aria-label="Classificar por">${SORTS.map(([k,n])=>`<option value="${k}"${sortBy===k?" selected":""}>Classificar: ${n}</option>`).join("")}</select>
    <button class="btn p" data-a="novaT">Nova tarefa</button></div>
   <div class="chips" style="margin-bottom:12px">${["Todos",...RESP].map(r=>`<button class="chip${filtroResp===r?" on":""}" data-a="resp" data-v="${r}">${r}${r==="Todos"?"":" ("+S.tarefas.filter(t=>t.resp===r).length+")"}</button>`).join("")}</div>
   <div class="wrap"><table><thead><tr><th>Cliente</th><th>Tarefa</th><th>Prioridade</th><th>Status</th><th>Dias para entrega</th><th>Início</th><th>Previsão</th><th>Responsável</th><th></th></tr></thead><tbody>
@@ -229,6 +232,7 @@ function acao(e){
   }
   if(e.type!=="change")return;
   if(a==="filtro"){filtroTar=v;return render()}
+  if(a==="sort"){sortBy=v;return render()}
   if(a==="fs")reg(id).status=v;
   else if(a==="fi")reg(id).impStatus=v;
   else if(a==="fv")reg(id).valor=parse(v);
